@@ -89,9 +89,8 @@ class pi_generalized_llh_params(PiStage):
 		output_names = ()
 
 		# what are the keys used from the inputs during apply
-		input_apply_keys = ('bin_indices','errors')
-		# what are keys added or altered in the calculation used during apply
-		output_calc_keys = ('weights',)
+		input_apply_keys = ('bin_indices','errors', 'weights')
+
 		# what keys are added or altered for the outputs during apply
 		output_apply_keys = ('weights', 'errors', 'llh_alphas', 'hs_scales',
 							 'llh_betas', 'n_mc_events', 'old_sum')

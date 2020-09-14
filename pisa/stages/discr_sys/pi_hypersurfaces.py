@@ -54,9 +54,18 @@ class pi_hypersurfaces(PiStage): # pylint: disable=invalid-name
         Path to hypersurface fit results file, i.e. the JSON file produced by the
         `pisa.scripts.fit_discrete_sys_nd.py` script
 
+    error_method : string, optional
+        Select an option for returning error terms in the output. Only sumw2
+        is currently available
+
     propagate_uncertainty : bool, optional
         Propagate the uncertainties from the hypersurface to the uncertainty of
-        the output
+        the output. The uncertainties are given by hs_scale_uncertainties, and 
+        are given as standard deviations (ie sqrt(variance))
+
+    interpolated : bool default is False
+        If True, extract the hypersurface scales using an interpolation
+        at the currently evaluated oscillation parameters
 
     params : ParamSet
         Note that the params required to be in `params` are determined from
@@ -146,13 +155,24 @@ class pi_hypersurfaces(PiStage): # pylint: disable=invalid-name
     # pylint: disable=line-too-long
     def setup_function(self):
         """Load the fit results from the file and make some check compatibility"""
+
+         
+        # Create an empty errors container if it doesn't exist (only if in events mode)
+        if self.output_specs=='events':
+            self.data.data_specs='events'
+            for container in self.data:
+                if 'errors' not in container:
+                    container['errors'] = np.empty(container.size, dtype=FTYPE)
+
+
         # load hypersurfaces
         if self.interpolated:
             self.hypersurfaces = hs.load_interpolated_hypersurfaces(self.fit_results_file, self.calc_specs)
         else:
             self.hypersurfaces = hs.load_hypersurfaces(self.fit_results_file, self.calc_specs)
-        self.data.data_specs = self.calc_specs
 
+        # moving to bin mode
+        self.data.data_specs = self.calc_specs
         if self.links is not None:
             for key, val in self.links.items():
                 self.data.link_containers(key, val)
@@ -220,12 +240,13 @@ class pi_hypersurfaces(PiStage): # pylint: disable=invalid-name
                 np.copyto(src=uncertainties, dst=container["hs_scales_uncertainty"].get('host'))
                 container["hs_scales_uncertainty"].mark_changed()
 
+
         # Unlink the containers again
         self.data.unlink_containers()
 
     @line_profile
     def apply_function(self):
-
+        S = 0.0
         for container in self.data:
             # update uncertainty first, before the weights are changed. This step is skipped in event mode
             if self.error_method == "sumw2":
@@ -233,18 +254,35 @@ class pi_hypersurfaces(PiStage): # pylint: disable=invalid-name
                 # If computing uncertainties in events mode, warn that
                 # hs error propagation will be skipped
                 if self.data.data_specs=='events':
-                    logging.trace('WARNING: running stage in events mode. Hypersurface error propagation will be IGNORED.')
-                
-                elif self.propagate_uncertainty:
-                    calc_uncertainty(container["weights"].get(WHERE),
-                                     container["hs_scales_uncertainty"].get(WHERE),
-                                     container["errors"].get(WHERE),
-                                    )
-                    container['errors'].mark_changed()
 
-                else:
-                    vectorizer.imul(container["hs_scales"], out=container["errors"])
+                    logging.trace('WARNING: running stage in events mode. Hypersurface error propagation might be slow.')
+
+                    N_bins = self.calc_specs.tot_num_bins
+                    errors = np.zeros(container.size)
+
+                    for index in range(N_bins):
+
+                        index_mask = container['bin_{}_mask'.format(index)].get(WHERE)==index
+                        w = container['weights'].get(WHERE)*index_mask
+                        unc = container.binned_data['hs_scales_uncertainty'][1].get(WHERE)[index]
+                        errors+= (w*unc)**2.
+
+                    np.copyto(src=errors, dst=container["errors"].get(WHERE))
                     container['errors'].mark_changed()
+                else:
+                    if  self.propagate_uncertainty:
+
+                        calc_uncertainty(container["weights"].get(WHERE),
+                                         container["hs_scales_uncertainty"].get(WHERE),
+                                         container["errors"].get(WHERE),
+                                        )
+                        container['errors'].mark_changed()
+
+
+                    else:
+                        vectorizer.imul(container["hs_scales"], out=container["errors"])
+                        container['errors'].mark_changed()
+
 
             # Update weights according to hypersurfaces
             propagate_hs_scales(container["weights"].get(WHERE),
@@ -252,7 +290,6 @@ class pi_hypersurfaces(PiStage): # pylint: disable=invalid-name
                                 container["weights"].get(WHERE))
 
             container['weights'].mark_changed()
-
 
 if FTYPE == np.float32:
     _SIGNATURE = ['(f4[:], f4[:], f4[:])']

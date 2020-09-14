@@ -36,11 +36,14 @@ class pi_hist(PiStage):  # pylint: disable=invalid-name
         output_names = ()
 
         # what are the keys used from the inputs during apply
-        input_apply_keys = ('weights',)
+        if error_method in ['propagate']:
+            input_apply_keys = ('weights','errors')
+        else:
+            input_apply_keys = ('weights',)
 
         # what are keys added or altered in the calculation used during apply
         assert calc_specs is None
-        if error_method in ['sumw2']:
+        if error_method in ['sumw2', 'propagate']:
             output_apply_keys = ('weights', 'errors')
         else:
             output_apply_keys = ('weights',)
@@ -74,6 +77,16 @@ class pi_hist(PiStage):  # pylint: disable=invalid-name
             for container in self.data:
                 container['errors'] = np.empty((container.size), dtype=FTYPE)
 
+        # if the error method is propagate, we assume that there is an errors
+        # container already created
+        if self.error_method in ['propagate']:
+            self.data.data_specs = self.input_specs
+            assert self.input_mode=='events', 'ERROR: propagate error method only working in events mode'
+
+            for container in self.data:
+                assert 'errors' in container.keys(), 'ERROR: errors container not found in %s'%container.name
+
+
     @profile
     def apply(self):
         # this is special, we want the actual event weights in the histo
@@ -98,7 +111,7 @@ class pi_hist(PiStage):  # pylint: disable=invalid-name
         elif self.input_mode == 'events':
             for container in self.data:
                 self.data.data_specs = self.input_specs
-                # calcualte errors
+                # calculate errors
                 if self.error_method in ['sumw2']:
                     vectorizer.pow(
                         vals=container['weights'],
@@ -107,7 +120,11 @@ class pi_hist(PiStage):  # pylint: disable=invalid-name
                     )
                 self.data.data_specs = self.output_specs
                 container.array_to_binned('weights', self.output_specs, averaged=False)
-                if self.error_method in ['sumw2']:
+
+                if self.error_method in ['propagate']:
+                    container.array_to_binned('errors', self.output_specs, averaged=False)
+
+                elif self.error_method in ['sumw2']:
                     container.array_to_binned(
                         'weights_squared', self.output_specs, averaged=False
                     )
