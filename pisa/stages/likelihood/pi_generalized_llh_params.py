@@ -107,7 +107,6 @@ class pi_generalized_llh_params(PiStage):
 												 output_specs=output_specs,
 												 input_apply_keys=input_apply_keys,
 												 output_apply_keys=output_apply_keys,
-												 output_calc_keys=output_calc_keys,
 												 )
 
 	def setup_function(self):
